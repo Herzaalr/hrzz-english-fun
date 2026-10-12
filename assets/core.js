@@ -62,7 +62,8 @@
         req.onblocked = () => rej(new Error('IndexedDB blocked'));
       });
     },
-    _tx(store, mode, fn) { return this.open().then((db) => new Promise((res, rej) => { const tx = db.transaction(store, mode); const r = fn(tx.objectStore(store)); tx.oncomplete = () => res(r && r.result !== undefined ? r.result : r); tx.onerror = () => rej(tx.error); })); },
+    /* get() miss resolves undefined — never leak the raw IDBRequest into app code */
+    _tx(store, mode, fn) { return this.open().then((db) => new Promise((res, rej) => { const tx = db.transaction(store, mode); const r = fn(tx.objectStore(store)); tx.oncomplete = () => res(r ? r.result : undefined); tx.onerror = () => rej(tx.error); })); },
     get(store, key) { if (key === undefined || key === null) return Promise.resolve(undefined); return this._tx(store, 'readonly', (s) => s.get(key)); },
     all(store) { return this._tx(store, 'readonly', (s) => s.getAll()); },
     put(store, obj) {
