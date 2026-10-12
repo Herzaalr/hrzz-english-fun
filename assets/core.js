@@ -26,6 +26,27 @@
   /* ================= DB (IndexedDB) ================= */
   const STORES = ['profile', 'settings', 'days', 'activities', 'sessions', 'milestones', 'errors', 'vocab', 'xpEvents', 'achievements', 'lessonProgress'];
   const KEYS = { profile: 'id', settings: 'id', days: 'date', activities: 'id', sessions: 'id', milestones: 'date', errors: 'key', vocab: 'id', xpEvents: 'key', achievements: 'id', lessonProgress: 'lessonId' };
+  /* Sanitize any value so IndexedDB's structured-clone never throws.
+     Drops functions, DOM nodes, IDBRequest/DB handles and other exotic
+     objects; keeps plain data, Dates, RegExps and Blobs intact. */
+  const sanitizeForIDB = (v, seen) => {
+    seen = seen || new WeakSet();
+    if (v === null || v === undefined) return v;
+    const t = typeof v;
+    if (t === 'string' || t === 'number' || t === 'boolean' || t === 'bigint') return v;
+    if (t === 'function' || t === 'symbol') return undefined;
+    if (seen.has(v)) return undefined; // circular refs can't be cloned
+    if (v instanceof Date || v instanceof RegExp || v instanceof Blob || (typeof File !== 'undefined' && v instanceof File)) return v;
+    if (typeof ArrayBuffer !== 'undefined' && (v instanceof ArrayBuffer || ArrayBuffer.isView(v))) return v;
+    if (typeof IDBRequest !== 'undefined' && v instanceof IDBRequest) return undefined;
+    if (typeof Node !== 'undefined' && v instanceof Node) return undefined;
+    seen.add(v);
+    if (Array.isArray(v)) return v.map((x) => { const s = sanitizeForIDB(x, seen); return s === undefined ? null : s; });
+    const o = {};
+    for (const k of Object.keys(v)) { const sv = sanitizeForIDB(v[k], seen); if (sv !== undefined) o[k] = sv; }
+    return o;
+  };
+
   const DB = {
     _db: null, memory: false, _mem: {},
     useMemory() { this.memory = true; const m = this._mem; this.get = async (s, k) => (k !== undefined && k !== null && (m[s] || {})[k]) ? JSON.parse(JSON.stringify(m[s][k])) : undefined; this.all = async (s) => Object.values(m[s] || {}).map((x) => JSON.parse(JSON.stringify(x))); this.put = async (s, o) => { (m[s] = m[s] || {})[o[KEYS[s]]] = JSON.parse(JSON.stringify(o)); return o; }; this.del = async (s, k) => { delete (m[s] || {})[k]; }; this.clearStore = async (s) => { m[s] = {}; }; },
@@ -44,7 +65,16 @@
     _tx(store, mode, fn) { return this.open().then((db) => new Promise((res, rej) => { const tx = db.transaction(store, mode); const r = fn(tx.objectStore(store)); tx.oncomplete = () => res(r && r.result !== undefined ? r.result : r); tx.onerror = () => rej(tx.error); })); },
     get(store, key) { if (key === undefined || key === null) return Promise.resolve(undefined); return this._tx(store, 'readonly', (s) => s.get(key)); },
     all(store) { return this._tx(store, 'readonly', (s) => s.getAll()); },
-    put(store, obj) { return this._tx(store, 'readwrite', (s) => s.put(obj)).then(() => obj); },
+    put(store, obj) {
+      const attempt = (o) => this._tx(store, 'readwrite', (s) => s.put(o)).then(() => obj);
+      return attempt(obj).catch((e) => {
+        if (e && e.name === 'DataCloneError') { // e.g. a function/DOM node/IDBRequest slipped into the data
+          console.warn('[HRZZ] put(' + store + '): uncloneable value sanitized and retried.', e);
+          return attempt(sanitizeForIDB(obj));
+        }
+        throw e;
+      });
+    },
     del(store, key) { if (key === undefined || key === null) return Promise.resolve(); return this._tx(store, 'readwrite', (s) => s.delete(key)); },
     clearStore(store) { return this._tx(store, 'readwrite', (s) => s.clear()); },
     async wipe() { for (const s of STORES) await this.clearStore(s); LS.del('hrzz-theme'); },
