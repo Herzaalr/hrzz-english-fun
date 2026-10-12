@@ -82,11 +82,11 @@
       pick.querySelectorAll('.chip').forEach((c) => c.addEventListener('click', () => startFree(c.dataset.t)));
     }
     function startFree(topic) {
-      stage.innerHTML = ''; const T = D.FREE_TALK[topic]; let used = new Set(); const history = [];
+      stage.innerHTML = ''; const TD = D.FREE_TALK[topic]; // topic data (renamed: T is the i18n function) let used = new Set(); const history = [];
       const scripted = async (userText, n) => {
         if (userText === null) return T.opener; history.push({ role: 'user', content: userText }); if (n >= 6) return null;
-        const low = userText.toLowerCase(); let pool = T.followups._; for (const k of Object.keys(T.followups)) { if (k !== '_' && low.includes(k)) { pool = [...T.followups[k], ...pool]; break; } }
-        const q = pool.find((x) => !used.has(x)) || T.followups._.find((x) => !used.has(x)); if (!q) return null; used.add(q);
+        const low = userText.toLowerCase(); let pool = TD.followups._; for (const k of Object.keys(TD.followups)) { if (k !== '_' && low.includes(k)) { pool = [...TD.followups[k], ...pool]; break; } }
+        const q = pool.find((x) => !used.has(x)) || TD.followups._.find((x) => !used.has(x)); if (!q) return null; used.add(q);
         const ack = userText.split(/\s+/).length >= 12 ? ['Nice, that is a full answer.', 'Love the detail.', 'Got it, thanks for explaining.'][n % 3] : ['Cool.', 'Okay!', 'Interesting.'][n % 3];
         return `${ack} ${q}`;
       };
